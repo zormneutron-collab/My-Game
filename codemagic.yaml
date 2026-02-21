@@ -1,0 +1,35 @@
+workflows:
+  android-workflow:
+    name: Juice Game Build
+    instance_type: mac_mini_m1
+    max_build_duration: 120
+    environment:
+      java: 17
+      vars:
+        GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx4g"
+    scripts:
+      - name: Clone LOVE Source (متوافق مع Megasource)
+        script: |
+          cd love-android-main || exit 1
+
+          # تنظيف أي بقايا سابقة
+          rm -rf app/src/main/cpp/love app/src/main/cpp/megasource app/.cxx
+
+          # ✅ كلاهما من فرع main لضمان التوافق
+          git clone --depth 1 https://github.com/love2d/megasource app/src/main/cpp/megasource || exit 1
+          git clone --depth 1 https://github.com/love2d/love app/src/main/cpp/love || exit 1
+
+          mkdir -p app/src/main/cpp/lua-modules
+          touch app/src/main/cpp/lua-modules/dummy.txt
+
+      - name: Build APK
+        script: |
+          cd love-android-main
+          chmod +x gradlew
+
+          ./gradlew assembleEmbedNoRecordRelease \
+            --no-daemon \
+            --stacktrace
+
+    artifacts:
+      - "**/build/outputs/apk/**/*.apk"

@@ -10,7 +10,7 @@ local font_big, font_small
 local shakeTimer, spawnTimer = 0, 0
 local lastDifficultyLevel = 1
 
-local PLAYER_SPEED = 820  -- سرعة ثابتة واحدة يمين ويسار
+local PLAYER_SPEED = 820
 
 -- ===== متغيرات scroll لنافذة Info =====
 local infoScrollY       = 0
@@ -22,11 +22,12 @@ local infoDragScrollStart = nil
 local _infoBtnBack = nil
 
 -- ===== متغيرات شاشة الموت =====
-local deathTimer     = 0
-local deathCountdown = 10
+local deathTimer       = 0
+local deathCountdown   = 10
 local _deathAdBtn, _deathExitBtn = nil, nil
 local adWaitingForResult = false
-local adUsedThisRound    = false  -- الإعلان يُشاهد مرة واحدة فقط لكل جولة
+local adUsedThisRound    = false
+local adNotAvailable     = false  -- الإعلان غير متاح حالياً
 
 -- ===== الحصول على Java Activity =====
 local _activity = nil
@@ -43,23 +44,39 @@ end
 local function callShowAd()
     local act = getActivity()
     if act then
-        pcall(function() act:showRewardedAd() end)
-        adWaitingForResult = true
-        return false  -- ننتظر pollAdReward
-    else
-        -- وضع التطوير (PC): أعطِ الحياة فوراً
-        return true
+        -- تحقق أولاً هل الإعلان جاهز
+        local ok, ready = pcall(function() return act:isAdReady() end)
+        if ok and ready then
+            pcall(function() act:showRewardedAd() end)
+            adWaitingForResult = true
+            adNotAvailable     = false
+        else
+            -- الإعلان غير جاهز — أخبر اللاعب ولا تنتظر
+            adNotAvailable     = true
+            adWaitingForResult = false
+            -- اطلب التحميل مجدداً
+            pcall(function() act:loadRewardedAd() end)
+        end
     end
 end
 
--- ===== فحص هل Java منحت المكافأة؟ =====
+-- ===== فحص هل Java منحت المكافأة أو رفضت؟ =====
 local function pollAdReward()
     if not adWaitingForResult then return false end
     local act = getActivity()
     if act then
-        local ok, result = pcall(function() return act:pollAdReward() end)
-        if ok and result then
+        -- فحص إذا الإعلان لم يكن جاهزاً
+        local ok1, notAvail = pcall(function() return act:pollAdNotAvailable() end)
+        if ok1 and notAvail then
             adWaitingForResult = false
+            adNotAvailable     = true
+            return false
+        end
+        -- فحص المكافأة
+        local ok2, result = pcall(function() return act:pollAdReward() end)
+        if ok2 and result then
+            adWaitingForResult = false
+            adNotAvailable     = false
             return true
         end
     end
@@ -69,11 +86,12 @@ end
 -- ===== تشغيل شاشة الموت =====
 local function triggerDeath()
     saveScore()
-    objects = {}          -- حذف كل العناصر فوراً
-    floatingTexts = {}    -- حذف النصوص العائمة أيضاً
-    deathTimer       = 0
-    deathCountdown   = 10
+    objects        = {}
+    floatingTexts  = {}
+    deathTimer     = 0
+    deathCountdown = 10
     adWaitingForResult = false
+    adNotAvailable     = false
     _deathAdBtn, _deathExitBtn = nil, nil
     gameState = "death"
 end
@@ -97,15 +115,15 @@ function love.load()
     imgs.btnRestart  = love.graphics.newImage("image/button_return.png")
     imgs.btnHome     = love.graphics.newImage("image/button_back.png")
 
-    snds.ice      = love.audio.newSource("Sound/pick_ice.wav",   "static")
-    snds.coffee   = love.audio.newSource("Sound/pick_coffe.wav", "static")
-    snds.cherry   = love.audio.newSource("Sound/Pick_cherry.wav","static")
-    snds.loseLife = love.audio.newSource("Sound/lost_life.wav",  "static")
-    snds.levelUp  = love.audio.newSource("Sound/level_up.wav",   "static")
-    snds.warning  = love.audio.newSource("Sound/low_life.wav",   "static")
-    snds.click    = love.audio.newSource("Sound/click.wav",      "static")
-    snds.night    = love.audio.newSource("Sound/night.wav",      "static")
-    snds.day      = love.audio.newSource("Sound/start_day.wav",  "static")
+    snds.ice      = love.audio.newSource("Sound/pick_ice.wav",    "static")
+    snds.coffee   = love.audio.newSource("Sound/pick_coffe.wav",  "static")
+    snds.cherry   = love.audio.newSource("Sound/Pick_cherry.wav", "static")
+    snds.loseLife = love.audio.newSource("Sound/lost_life.wav",   "static")
+    snds.levelUp  = love.audio.newSource("Sound/level_up.wav",    "static")
+    snds.warning  = love.audio.newSource("Sound/low_life.wav",    "static")
+    snds.click    = love.audio.newSource("Sound/click.wav",       "static")
+    snds.night    = love.audio.newSource("Sound/night.wav",       "static")
+    snds.day      = love.audio.newSource("Sound/start_day.wav",   "static")
 
     SW, SH = love.graphics.getDimensions()
     player = {
@@ -118,9 +136,7 @@ end
 
 function updateGame(dt)
     gameTime   = gameTime + dt
-    -- الصعوبة تتصاعد بشكل أسرع وبحد أعلى بكثير لتحدي اللاعبين المحترفين
     difficulty = 1 + (gameTime / 60) * 0.35
-    -- لا يوجد حد أقصى للصعوبة — تستمر في الارتفاع إلى ما لا نهاية
     if math.floor(difficulty * 10) > math.floor(lastDifficultyLevel * 10) then
         snds.levelUp:play(); lastDifficultyLevel = difficulty
     end
@@ -134,7 +150,6 @@ function updateGame(dt)
         if isNight then snds.night:play() else snds.day:play() end
     end
 
-    -- حركة بسيطة: سرعة ثابتة يمين أو يسار حسب جهة اللمس
     if love.mouse.isDown(1) then
         local mx = love.mouse.getX()
         if mx < SW/2 then
@@ -148,7 +163,6 @@ function updateGame(dt)
     spawnTimer = spawnTimer - dt
     if spawnTimer <= 0 then
         spawnObject()
-        -- الفترة بين العناصر تقل مع الوقت بلا حد أدنى صارم
         local spawnRate = math.max(0.18, math.random(0.4, 1.1) / (1 + (gameTime / 60) * 0.3))
         spawnTimer = spawnRate
     end
@@ -159,7 +173,6 @@ function updateGame(dt)
             o.y = o.y + o.vy * dt
             o.x = o.x + o.vx * dt
 
-            -- حاجز الجدران: ارتد عند حواف الشاشة بدلاً من الخروج
             if o.x - o.w/2 < 0 then
                 o.x  = o.w/2
                 o.vx = math.abs(o.vx)
@@ -168,7 +181,6 @@ function updateGame(dt)
                 o.vx = -math.abs(o.vx)
             end
 
-            -- منطقة التقاط: عرض الكوب + 20px هامش معقول من كل جانب
             local hitWidth = player.w + 40
             if (o.x > player.x - hitWidth/2) and (o.x < player.x + hitWidth/2) and
                (o.y + o.h/2 > player.y) and (o.y < player.y + 40) then
@@ -206,7 +218,7 @@ local function updateDeath(dt)
         floatingTexts   = {}
         spawnTimer      = 1.0
         lives           = 1
-        adUsedThisRound = true   -- لا يمكن مشاهدة الإعلان مرة ثانية في نفس الجولة
+        adUsedThisRound = true
         gameState       = "play"
         return
     end
@@ -252,23 +264,28 @@ local function drawDeathScreen()
     love.graphics.setFont(font_big)
     love.graphics.setColor(cc[1], cc[2], cc[3], 1)
     love.graphics.printf(tostring(math.max(deathCountdown, 0)), panelX, panelY + 154, panelW, "center")
+
+    -- رسالة الحالة تحت العداد
     love.graphics.setFont(font_small)
     if adWaitingForResult then
         love.graphics.setColor(0.3, 1, 0.5, 1)
         love.graphics.printf("Watching ad... please wait", panelX, panelY + 204, panelW, "center")
+    elseif adNotAvailable then
+        love.graphics.setColor(1, 0.4, 0.4, 1)
+        love.graphics.printf("Ad not available, try later", panelX, panelY + 204, panelW, "center")
     else
         love.graphics.setColor(0.75, 0.75, 0.75, 1)
         love.graphics.printf("seconds remaining", panelX, panelY + 204, panelW, "center")
     end
 
-    -- زر الإعلان — يظهر فقط إذا لم يُستخدم بعد
+    -- زر الإعلان
     local adBtnW = panelW - 60
     local adBtnH = 64
     local adBtnX = panelX + 30
     local adBtnY = panelY + 246
 
     if adUsedThisRound then
-        -- تم استخدام الإعلان — رسالة رمادية بدلاً من الزر
+        -- تم استخدام الإعلان — زر رمادي معطّل
         love.graphics.setColor(0.4, 0.4, 0.4, 0.6)
         love.graphics.rectangle("fill", adBtnX, adBtnY, adBtnW, adBtnH, 14, 14)
         love.graphics.setColor(0.6, 0.6, 0.6, 0.5)
@@ -276,8 +293,22 @@ local function drawDeathScreen()
         love.graphics.rectangle("line", adBtnX, adBtnY, adBtnW, adBtnH, 14, 14)
         love.graphics.setColor(0.6, 0.6, 0.6, 1)
         love.graphics.printf("No more chances this round", adBtnX, adBtnY + 22, adBtnW, "center")
-        _deathAdBtn = nil  -- لا يستجيب للنقر
+        _deathAdBtn = nil
+
+    elseif adNotAvailable then
+        -- الإعلان غير متاح — زر برتقالي مع رسالة
+        love.graphics.setColor(0.35, 0.18, 0.05, 1)
+        love.graphics.rectangle("fill", adBtnX, adBtnY, adBtnW, adBtnH, 14, 14)
+        love.graphics.setColor(1.0, 0.55, 0.1, 0.75)
+        love.graphics.setLineWidth(2)
+        love.graphics.rectangle("line", adBtnX, adBtnY, adBtnW, adBtnH, 14, 14)
+        love.graphics.setColor(1, 0.85, 0.5, 1)
+        love.graphics.printf("Ad not ready — Tap to retry", adBtnX, adBtnY + 22, adBtnW, "center")
+        -- لا يزال قابلاً للضغط لإعادة المحاولة
+        _deathAdBtn = { x = adBtnX, y = adBtnY, w = adBtnW, h = adBtnH }
+
     else
+        -- الزر الطبيعي
         love.graphics.setColor(adWaitingForResult and 0.3 or 0.12,
                                adWaitingForResult and 0.3 or 0.68,
                                adWaitingForResult and 0.3 or 0.32, 1)
@@ -289,7 +320,8 @@ local function drawDeathScreen()
         love.graphics.printf(
             adWaitingForResult and "Waiting for reward..." or "Watch Ad & Get 1 Life",
             adBtnX, adBtnY + 22, adBtnW, "center")
-        _deathAdBtn = { x = adBtnX, y = adBtnY, w = adBtnW, h = adBtnH }
+        _deathAdBtn = adWaitingForResult and nil
+                      or { x = adBtnX, y = adBtnY, w = adBtnW, h = adBtnH }
     end
 
     -- زر الخروج
@@ -389,34 +421,32 @@ function drawPauseMenu()
         imgs.uiPanel:getWidth()/2, imgs.uiPanel:getHeight()/2)
     local spacing = 80
     local btnY = uiY + (uiH * 0.25)
-    love.graphics.draw(imgs.btnHome,     uiX-spacing, btnY, 0, btnScale, btnScale, imgs.btnHome:getWidth()/2,     imgs.btnHome:getHeight()/2)
-    love.graphics.draw(imgs.btnRestart,  uiX,         btnY, 0, btnScale, btnScale, imgs.btnRestart:getWidth()/2,  imgs.btnRestart:getHeight()/2)
-    love.graphics.draw(imgs.btnContinue, uiX+spacing, btnY, 0, btnScale, btnScale, imgs.btnContinue:getWidth()/2, imgs.btnContinue:getHeight()/2)
+    love.graphics.draw(imgs.btnHome,     uiX-spacing, btnY, 0, btnScale, btnScale,
+        imgs.btnHome:getWidth()/2,     imgs.btnHome:getHeight()/2)
+    love.graphics.draw(imgs.btnRestart,  uiX,         btnY, 0, btnScale, btnScale,
+        imgs.btnRestart:getWidth()/2,  imgs.btnRestart:getHeight()/2)
+    love.graphics.draw(imgs.btnContinue, uiX+spacing, btnY, 0, btnScale, btnScale,
+        imgs.btnContinue:getWidth()/2, imgs.btnContinue:getHeight()/2)
 end
 
 local function handleDeathClick(x, y)
-    -- زر الإعلان — فقط إذا لم يُستخدم بعد
+    -- زر الإعلان
     if not adUsedThisRound and not adWaitingForResult and _deathAdBtn and
        x >= _deathAdBtn.x and x <= _deathAdBtn.x + _deathAdBtn.w and
        y >= _deathAdBtn.y and y <= _deathAdBtn.y + _deathAdBtn.h then
         snds.click:play()
-        local immediateSuccess = callShowAd()
-        if immediateSuccess then
-            objects         = {}
-            floatingTexts   = {}
-            spawnTimer      = 1.0
-            lives           = 1
-            adUsedThisRound = true
-            gameState       = "play"
-        end
+        adNotAvailable = false  -- أعد الضبط قبل المحاولة
+        callShowAd()
         return
     end
 
+    -- زر الخروج
     if _deathExitBtn and
        x >= _deathExitBtn.x and x <= _deathExitBtn.x + _deathExitBtn.w and
        y >= _deathExitBtn.y and y <= _deathExitBtn.y + _deathExitBtn.h then
         snds.click:play()
         adWaitingForResult = false
+        adNotAvailable     = false
         gameState = "menu"
         return
     end
@@ -424,7 +454,7 @@ end
 
 function love.mousepressed(x, y, button)
     if button == 1 and gameState == "info" then
-        infoDragStartY    = y
+        infoDragStartY      = y
         infoDragScrollStart = infoScrollY
     end
 end
@@ -439,7 +469,6 @@ end
 function love.mousereleased(x, y, button)
     if button ~= 1 then return end
 
-    -- إيقاف السحب دائماً
     infoDragStartY = nil
 
     if gameState == "death" then
@@ -456,7 +485,6 @@ function love.mousereleased(x, y, button)
         end
 
     elseif gameState == "info" then
-        -- يرجع فقط إذا ضغط على زر Back المحدد
         if _infoBtnBack and
            x >= _infoBtnBack.x and x <= _infoBtnBack.x + _infoBtnBack.w and
            y >= _infoBtnBack.y and y <= _infoBtnBack.y + _infoBtnBack.h then
@@ -479,9 +507,7 @@ function love.mousereleased(x, y, button)
 end
 
 function spawnObject()
-    -- السرعة والكثافة تتصاعدان بلا سقف — كلما طالت اللعبة زادت الصعوبة
-    local speedScale  = 1 + (gameTime / 60) * 0.4   -- سرعة السقوط
-    local spawnScale  = 1 + (gameTime / 60) * 0.3   -- كثافة الظهور (يُستخدم في spawnTimer)
+    local speedScale = 1 + (gameTime / 60) * 0.4
     local oType = isNight and "coffee"
                or (math.random() < 0.07 and "cherry"
                or (math.random() < 0.25  and "coffee" or "ice"))
@@ -520,15 +546,15 @@ function resetGame()
     score, lives, cherryCount, gameTime, cycleTimer,
     objects, floatingTexts, difficulty, shakeTimer,
     isNight, spawnTimer, lastDifficultyLevel = 0, 5, 0, 0, 0, {}, {}, 1, 0, false, 0, 1
-    adUsedThisRound = false  -- إعادة تفعيل الإعلان لكل جولة جديدة
+    adUsedThisRound  = false
+    adNotAvailable   = false
+    adWaitingForResult = false
 end
 
 function drawInfo()
-    -- خلفية شبه شفافة
     love.graphics.setColor(0, 0, 0, 0.65)
     love.graphics.rectangle("fill", 0, 0, SW, SH)
 
-    -- النافذة
     local winW = SW * 0.82
     local winH = SH * 0.68
     local winX = (SW - winW) / 2
@@ -540,7 +566,6 @@ function drawInfo()
     love.graphics.setLineWidth(2)
     love.graphics.rectangle("line", winX, winY, winW, winH, 18, 18)
 
-    -- خط صغير مخصص للمحتوى
     local font_info = love.graphics.newFont(14)
 
     love.graphics.setScissor(winX + 2, winY + 2, winW - 4, winH - 4)
@@ -548,11 +573,10 @@ function drawInfo()
     local pad = 18
     local tw  = winW - pad * 2
     local tx  = winX + pad
-    local lh  = 30   -- ارتفاع السطر
-    local sh  = 16   -- مسافة إضافية بين الأقسام
+    local lh  = 30
+    local sh  = 16
     local ty  = winY + pad - infoScrollY
 
-    -- دالة عنوان قسم
     local function section(title)
         ty = ty + sh
         love.graphics.setFont(font_info)
@@ -561,7 +585,6 @@ function drawInfo()
         ty = ty + lh + 2
     end
 
-    -- دالة سطر نص
     local function line(text, r, g, b)
         love.graphics.setFont(font_info)
         love.graphics.setColor(r or 1, g or 1, b or 1, 0.92)
@@ -569,7 +592,6 @@ function drawInfo()
         ty = ty + lh
     end
 
-    -- دالة فاصل
     local function divider()
         ty = ty + sh
         love.graphics.setColor(1, 1, 1, 0.10)
@@ -577,7 +599,6 @@ function drawInfo()
         ty = ty + sh
     end
 
-    -- العنوان بخط أكبر قليلاً
     local font_title = love.graphics.newFont(26)
     love.graphics.setFont(font_title)
     love.graphics.setColor(0.45, 0.80, 1.0, 1)
@@ -619,13 +640,11 @@ function drawInfo()
     line("Night: only coffee falls")
     line("No speed limit — push your limits")
 
-    -- حساب أقصى scroll مع فراغ إضافي 80px تحت آخر سطر
     local contentH = (ty + infoScrollY) - (winY + pad) + 80
     infoMaxScroll = math.max(0, contentH - winH + pad)
 
     love.graphics.setScissor()
 
-    -- شريط scroll
     if infoMaxScroll > 0 then
         local trackH = winH - 20
         local thumbH = math.max(28, trackH * (winH / (winH + infoMaxScroll)))
@@ -636,7 +655,6 @@ function drawInfo()
         love.graphics.rectangle("fill", winX + winW - 8, thumbY, 4, thumbH, 2, 2)
     end
 
-    -- زر Back
     local btnW = winW * 0.55
     local btnH = 46
     local btnX = (SW - btnW) / 2
@@ -660,24 +678,21 @@ function drawMenu()
     love.graphics.draw(imgs.btnPlay, SW/2, SH*0.5,  0, 1, 1, btnW/2, imgs.btnPlay:getHeight()/2)
     love.graphics.draw(imgs.btnInfo, SW/2, SH*0.65, 0, 1, 1, btnW/2, imgs.btnInfo:getHeight()/2)
 
-    -- UI شفافة حول BEST SCORE تتمدد مع طول الرقم
     love.graphics.setFont(font_big)
-    local label     = "BEST SCORE"
-    local numStr    = tostring(highScore)
-    local labelW    = font_big:getWidth(label)
-    local numW      = font_big:getWidth(numStr)
-    local boxW      = math.max(labelW, numW) + 60   -- هامش أفقي 30px من كل جانب
-    local boxH      = font_big:getHeight() * 2 + 28  -- سطران + مسافة بينهما
-    local boxX      = (SW - boxW) / 2
-    local boxY      = SH * 0.18
+    local label  = "BEST SCORE"
+    local numStr = tostring(highScore)
+    local labelW = font_big:getWidth(label)
+    local numW   = font_big:getWidth(numStr)
+    local boxW   = math.max(labelW, numW) + 60
+    local boxH   = font_big:getHeight() * 2 + 28
+    local boxX   = (SW - boxW) / 2
+    local boxY   = SH * 0.18
 
-    -- الخلفية السوداء الشفافة
     love.graphics.setColor(0, 0, 0, 0.55)
     love.graphics.rectangle("fill", boxX, boxY, boxW, boxH, 14, 14)
 
-    -- النص
     love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.printf(label,  boxX, boxY + 8,                          boxW, "center")
+    love.graphics.printf(label,  boxX, boxY + 8,                           boxW, "center")
     love.graphics.setColor(1, 0.85, 0.2, 1)
     love.graphics.printf(numStr, boxX, boxY + 8 + font_big:getHeight() + 6, boxW, "center")
 end

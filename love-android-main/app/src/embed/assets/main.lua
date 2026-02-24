@@ -174,7 +174,7 @@ function updateGame(dt)
                 o.vx = -math.abs(o.vx)
             end
 
-            local hitWidth = player.w + 40
+            local hitWidth = player.w + 10
             if (o.x > player.x - hitWidth/2) and (o.x < player.x + hitWidth/2) and
                (o.y + o.h/2 > player.y) and (o.y < player.y + 40) then
                 o.isFading = true; processScore(o)

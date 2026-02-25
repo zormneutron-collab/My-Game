@@ -197,7 +197,7 @@ function updateGame(dt)
     spawnTimer = spawnTimer - dt
     if spawnTimer <= 0 then
         spawnObject()
-        local spawnRate = math.max(0.18, math.random(0.4, 1.1) / (1 + (gameTime / 60) * 0.3))
+        local spawnRate = math.max(0.18, math.random(0.4, 1.1) / (1 + (gameTime / 60) * 0.2))
         spawnTimer = spawnRate
     end
 

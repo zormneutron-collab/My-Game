@@ -170,7 +170,7 @@ end
 
 function updateGame(dt)
     gameTime   = gameTime + dt
-    difficulty = 1 + (gameTime / 60) * 0.30
+    difficulty = 1 + (gameTime / 60) * 0.20
     if math.floor(difficulty * 10) > math.floor(lastDifficultyLevel * 10) then
         snds.levelUp:play(); lastDifficultyLevel = difficulty
     end

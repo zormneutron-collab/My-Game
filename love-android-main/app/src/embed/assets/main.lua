@@ -170,7 +170,7 @@ end
 
 function updateGame(dt)
     gameTime   = gameTime + dt
-    difficulty = 1 + (gameTime / 60) * 0.35
+    difficulty = 1 + (gameTime / 60) * 0.30
     if math.floor(difficulty * 10) > math.floor(lastDifficultyLevel * 10) then
         snds.levelUp:play(); lastDifficultyLevel = difficulty
     end
@@ -546,7 +546,7 @@ function love.mousereleased(x, y, button)
 end
 
 function spawnObject()
-    local speedScale = 1 + (gameTime / 60) * 0.4
+    local speedScale = 1 + (gameTime / 60) * 0.2
     local oType = isNight and "coffee"
                or (math.random() < 0.07 and "cherry"
                or (math.random() < 0.25  and "coffee" or "ice"))

@@ -1,6 +1,5 @@
 package org.love2d.android;
 
-import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -18,8 +17,6 @@ import android.view.WindowManager;
 
 import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
-import androidx.core.app.ActivityCompat;
-
 import org.libsdl.app.SDLActivity;
 
 import java.io.FileNotFoundException;
@@ -39,7 +36,6 @@ public class GameActivity extends SDLActivity {
 
     private static final String TAG        = "GameActivity";
     private static final String ADTAG      = "UnityAdsGame";
-    public  static final int RECORD_AUDIO_REQUEST_CODE = 3;
 
     private static final String GAME_ID    = "6051973";
     private static final String AD_UNIT_ID = "Rewarded_Android";
@@ -59,7 +55,6 @@ public class GameActivity extends SDLActivity {
 
     protected Vibrator vibrator;
     protected boolean  shortEdgesMode;
-    protected final int[] recordAudioRequestDummy = new int[1];
     private Uri      delayedUri = null;
     private String[] args;
     private boolean  isFused;
@@ -322,16 +317,7 @@ public class GameActivity extends SDLActivity {
     public void onRequestPermissionsResult(int requestCode,
                                            String[] permissions,
                                            int[] grantResults) {
-        if (grantResults.length > 0) {
-            if (requestCode == RECORD_AUDIO_REQUEST_CODE) {
-                synchronized (recordAudioRequestDummy) {
-                    recordAudioRequestDummy[0] = grantResults[0];
-                    recordAudioRequestDummy.notify();
-                }
-            } else {
-                super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-            }
-        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
 
     @Keep
@@ -426,27 +412,6 @@ public class GameActivity extends SDLActivity {
 
     @Keep
     public boolean getImmersiveMode() { return shortEdgesMode; }
-
-    @Keep
-    public boolean hasRecordAudioPermission() {
-        return ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-               == PackageManager.PERMISSION_GRANTED;
-    }
-
-    @Keep
-    public void requestRecordAudioPermission() {
-        if (hasRecordAudioPermission()) return;
-        ActivityCompat.requestPermissions(this,
-            new String[]{Manifest.permission.RECORD_AUDIO},
-            RECORD_AUDIO_REQUEST_CODE);
-        synchronized (recordAudioRequestDummy) {
-            try {
-                recordAudioRequestDummy.wait();
-            } catch (InterruptedException e) {
-                Log.d(TAG, "mic wait interrupted", e);
-            }
-        }
-    }
 
     public int getAudioSMP() {
         int smp = 256;
